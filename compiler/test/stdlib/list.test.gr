@@ -1,0 +1,129 @@
+import * from 'list'
+
+let list = [1, 2, 3]
+
+# List.sum
+
+assert sum(list) == 6
+assert sum([]) == 0
+
+# List.reverse
+
+assert reverse([]) == []
+assert reverse(list) == [3, 2, 1]
+
+# List.length
+
+assert length([]) == 0
+assert length(list) == 3
+
+# List.append
+
+assert append(list, [4]) == [1, 2, 3, 4]
+assert append([], [4]) == [4]
+
+# List.contains
+
+assert contains(3, list)
+assert contains(3, []) == false
+
+# List.map
+
+assert map(x => x + 1, list) == [2, 3, 4]
+assert map(x => x * 2, list) == [2, 4, 6]
+assert map(x => x + 1, []) == []
+
+# List.mapi
+
+let numbers = [2, 3, 4]
+let multiply = (n, i) => n * i
+
+assert mapi(multiply, numbers) == [0, 3, 8]
+assert mapi(multiply, []) == []
+
+# List.reduce
+
+assert reduce((acc, cur) => acc - cur, 0, list) == -6
+assert reduce((acc, cur) => acc - cur, 0, []) == 0
+
+# List.reduceRight
+
+assert reduceRight((acc, cur) => acc - cur, 0, list) == 2
+assert reduceRight((acc, cur) => acc - cur, 0, []) == 0
+
+# List.every
+
+assert every(x => x > 0, list)
+assert !every(x => x > 2, list)
+assert every(x => x == 3, [])
+
+# List.some
+
+assert some(x => x > 0, list)
+assert !some(x => x > 3, list)
+assert !some(x => x == 3, [])
+
+# List.filter
+
+assert filter(x => x > 0, list) == list
+assert filter(x => x > 3, list) == []
+assert filter(x => x == 3, list) == [3]
+
+# List.reject
+
+assert reject(x => x > 0, list) == []
+assert reject(x => x > 3, list) == list
+assert reject(x => x == 3, list) == [1, 2]
+
+# List.head
+
+assert head(list) == 1
+assert head([2]) == 2
+
+# List.tail
+
+assert tail(list) == [2, 3]
+assert tail([1]) == []
+
+# List.nth
+
+assert nth(0, list) == 1
+assert nth(2, list) == 3
+
+# List.flatten
+
+assert flatten([[1], [2], [3]]) == list
+assert flatten([[], list]) == list
+assert flatten([list, []]) == list
+
+# List.insert
+
+assert insert(1, 0, []) == [1]
+assert insert(0, 0, list) == [0, 1, 2, 3]
+assert insert(0, 2, list) == [1, 2, 0, 3]
+assert insert(0, 3, list) == [1, 2, 3, 0]
+
+# List.count
+
+assert count(x => x > 0, list) == 3
+assert count(x => x > 0, []) == 0
+assert count(x => x == 3, list) == 1
+
+# List.part
+
+assert part(0, list) == ([], list)
+assert part(3, list) == (list, [])
+assert part(2, list) == ([1, 2], [3])
+
+# List.rotate
+
+assert rotate(0, list) == list
+assert rotate(1, list) == [2, 3, 1]
+assert rotate(2, list) == [3, 1, 2]
+assert rotate(-2, list) == [2, 3, 1]
+
+# List.unique
+
+assert unique([]) == []
+assert unique(list) == list
+assert unique([1, 1, 1, 1]) == [1]

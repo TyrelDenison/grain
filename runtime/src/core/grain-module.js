@@ -1,5 +1,28 @@
 import { GrainError } from '../errors/errors';
-import { grainToJSVal } from '../utils/utils';
+
+import { WASI } from "@wasmer/wasi/lib/index.cjs";
+import { WasmFs } from "@wasmer/wasmfs";
+
+let bindings
+
+if (__RUNTIME_BROWSER) {
+  const wasmFs = new WasmFs();
+  bindings = {
+    ...wasiBindings.default,
+    fs: wasmFs.fs
+  }
+} else {
+  bindings = wasiBindings.default
+}
+
+export const wasi = new WASI({
+  args: __RUNTIME_BROWSER ? [] : process.argv,
+  env: __RUNTIME_BROWSER ? {} : process.env,
+  bindings,
+  preopens: {
+    '/sandbox': __RUNTIME_BROWSER ? '' : process.cwd()
+  }
+});
 
 export class GrainModule {
   constructor(wasmModule, name) {
@@ -60,7 +83,7 @@ export class GrainModule {
   }
 
   get isGrainModule() {
-    return !!this.exports["GRAIN$MAIN"]
+    return !!this.exports["_start"]
   }
 
   requiredExport(key) {
@@ -71,12 +94,16 @@ export class GrainModule {
     return exports[key];
   }
 
-  get main() {
-    return this.requiredExport("GRAIN$MAIN");
+  start() {
+    wasi.start(this.instantiated)
   }
 
   get tableSize() {
     return this.requiredExport("GRAIN$TABLE_SIZE");
+  }
+
+  get cleanupGlobals() {
+    return this.requiredExport("GRAIN$CLEANUP_GLOBALS");
   }
 
   get types() {
@@ -86,13 +113,13 @@ export class GrainModule {
         return null;
       }
       this._types = {};
-      let idx = 0;
       cmi.cmi_sign.forEach(elt => {
         if (elt[0] !== "TSigType") {
           return;
         }
+        let id = elt[2].type_path[1].stamp
         let typ = {};
-        this._types[idx++] = typ;
+        this._types[id] = typ;
         let desc = elt[2];
         let kind = desc.type_kind;
         if (!kind) return;
@@ -142,14 +169,21 @@ export class GrainModule {
       console.log('');
     });*/
     this.runner = runner;
-    this._instantiated = await WebAssembly.instantiate(this.wasmModule, importObj);
+    try {
+      this._instantiated = await WebAssembly.instantiate(this.wasmModule, importObj);
+    } catch (e) {
+      console.error(`Exception while instantiating ${this.name}`);
+      throw e;
+    }
     //console.log(`Instantiated: ${this._instantiated}.`);
     //console.log(`fields: ${Object.keys(this._instantiated)}`);
   }
 
-  async run() {
-    let res = await this.main();
-    return grainToJSVal(this.runner, res);
+  async runUnboxed() {
+    // This works because we use @wasmer/wasi, but will break in the future.
+    // Only the tests currently rely on this.
+    wasi.setMemory(this.requiredExport('memory'));
+    return await this.requiredExport('_start')();
   }
 }
 
@@ -163,7 +197,6 @@ export async function readFile(path) {
 
 export async function readURL(url) {
   let modname = url; // FIXME
-  console.log(`Reading module at URL: ${url}`);
   let response = await fetch(url);
   if (!response.ok) throw new Error(`[Grain] Could not load ${url} due to a network error.`);
   let module = await WebAssembly.compileStreaming(response);

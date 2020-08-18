@@ -1,9 +1,9 @@
 (executable
  (name test)
- (libraries grain oUnit extlib))
+ (libraries grain str oUnit))
 
-(alias
- (name runtest)
+(rule
+ (alias runtest)
  (deps
   (:< test.exe)
   (source_tree input)

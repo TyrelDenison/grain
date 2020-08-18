@@ -4,6 +4,7 @@ open Identifier
 open Dyp
 open Parsetree
 open Ast_helper
+open Grain_utils
 
 (* Used for error messages and as a default, in case anything slips through
    without an explicit loc. *)
@@ -68,7 +69,7 @@ let fix_block_mapper super =
       (* Properly nest let bindings *)
       let elts = List.fold_right (fun ({pexp_desc} as stmt) elts ->
         match pexp_desc with
-        | PExpLet(r, binds, _) -> [{stmt with pexp_desc=PExpLet(r, binds, {stmt with pexp_desc=PExpBlock(elts)})}]
+        | PExpLet(r, m, binds, _) -> [{stmt with pexp_desc=PExpLet(r, m, binds, {stmt with pexp_desc=PExpBlock(elts)})}]
         | _ -> stmt::elts
       ) elts [] in
       {e with pexp_desc=PExpBlock(elts)}
@@ -109,7 +110,7 @@ let no_uppercase_ident expr =
   match expr.pexp_desc with
   | PExpId {txt=id} ->
     let first_char = String.get (Identifier.last id) 0 in
-    if first_char = BatChar.uppercase first_char then raise Dyp.Giveup
+    if Char_utils.is_uppercase_letter first_char then raise Dyp.Giveup
   | _ -> ()
 
 let no_array_access expr =
@@ -121,7 +122,7 @@ let no_array_access expr =
 let mkid ns =
   let help ns =
     let rec help ns (acc_ident, acc_str) =
-      let ident = Option.map_default (fun i -> IdentExternal(i, acc_str)) (IdentName acc_str) acc_ident in
+      let ident = Option.fold ~some:(fun i -> IdentExternal(i, acc_str)) ~none:(IdentName acc_str) acc_ident in
       match ns with
         | [] -> ident
         | n::tl -> help tl (Some ident, n) in
@@ -147,6 +148,8 @@ let make_program statements =
 %relation pe<pt<pp<pb<pc<pa<pl
 
 %token <int> NUM
+%token <int32> INT32
+%token <int64> INT64
 %token <string> ID
 %token <string> TYPEID
 %token <string> STRING
@@ -154,7 +157,7 @@ let make_program statements =
 %token CARET
 %token COMMA SEMI AS
 %token THICKARROW ARROW PIPE
-%token EQEQ LESSEQ GREATEREQ
+%token IS EQEQ LESSEQ GREATEREQ
 %token EQUAL GETS
 %token UNDERSCORE
 %token COLON COLONCOLON DOT ELLIPSIS
@@ -162,9 +165,9 @@ let make_program statements =
 %token ASSERT FAIL
 
 %token PLUS DASH STAR SLASH PERCENT
-%token TRUE FALSE
+%token TRUE FALSE VOID
 
-%token LET REC IF ELSE MATCH WHILE
+%token LET MUT REC IF ELSE MATCH WHILE
 %token AMPAMP PIPEPIPE NOT
 
 %token DATA IMPORT EXPORT FOREIGN WASM PRIMITIVE
@@ -175,59 +178,68 @@ let make_program statements =
 
 %parser
 
+eol :
+  | EOL { () }
+
+eols :
+  | eol+ { () }
+
 eos :
-  | EOL { None }
-  | SEMI EOL? { None }
+  | eols { None }
+  | SEMI eols? { None }
 
-lbrack : 
-  | LBRACK EOL? { () }
+lbrack :
+  | LBRACK eols? { () }
 
-rbrack : 
-  | EOL? RBRACK { () }
+rbrack :
+  | eols? RBRACK { () }
 
-lparen : 
-  | LPAREN EOL? { () }
+lparen :
+  | LPAREN eols? { () }
 
-rparen : 
-  | EOL? RPAREN { () }
+rparen :
+  | eols? RPAREN { () }
 
-lbrace : 
-  | LBRACE EOL? { () }
+lbrace :
+  | LBRACE eols? { () }
 
-rbrace : 
-  | EOL? RBRACE { () }
+rbrace :
+  | eols? RBRACE { () }
 
-lcaret : 
-  | LCARET EOL? { () }
+lcaret :
+  | LCARET eols? { () }
 
-rcaret : 
-  | EOL? RCARET { () }
+rcaret :
+  | eols? RCARET { () }
 
 comma :
-  | EOL? COMMA EOL? { () }
+  | eols? COMMA eols? { () }
 
 colon :
-  | EOL? COLON EOL? { () }
+  | eols? COLON eols? { () }
 
 dot :
-  | EOL? DOT EOL? { () }
+  | eols? DOT eols? { () }
 
 arrow :
-  | EOL? ARROW EOL? { () }
+  | eols? ARROW eols? { () }
 
 thickarrow :
-  | EOL? THICKARROW EOL? { () }
+  | eols? THICKARROW eols? { () }
 
 pipe :
-  | PIPE EOL? { () }
+  | PIPE eols? { () }
 
 equal :
-  | EOL? EQUAL EOL? { () }
+  | eols? EQUAL eols? { () }
 
 const :
   | NUM { Const.int $1 }
+  | INT32 { Const.int32 $1 }
+  | INT64 { Const.int64 $1 }
   | TRUE { Const.bool true }
   | FALSE { Const.bool false }
+  | VOID { Const.void }
   | STRING { Const.string $1 }
 
 expr :
@@ -235,28 +247,22 @@ expr :
   | binop_expr
 
 binop_expr :
-  | binop_expr(<=pa) EOL? pluseq_op EOL?    binop_expr(<pa) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pa
-  | binop_expr(<=pa) EOL? dasheq_op EOL?    binop_expr(<pa) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pa
-  | binop_expr(<=pa) EOL? stareq_op EOL?    binop_expr(<pa) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pa
-  | binop_expr(<=pa) EOL? slasheq_op EOL?   binop_expr(<pa) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pa
-  | binop_expr(<=pp) EOL? plus_op EOL?      binop_expr(<pp) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pp
-  | binop_expr(<=pp) EOL? dash_op EOL?      binop_expr(<pp) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pp
-  | binop_expr(<=pt) EOL? star_op EOL?      binop_expr(<pt) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pt
-  | binop_expr(<=pt) EOL? slash_op EOL?     binop_expr(<pt) { Exp.prim2 ~loc:(symbol_rloc dyp) Divide $1 $5 } pt
-  | binop_expr(<=pb) EOL? percent_op EOL?   binop_expr(<pb) { Exp.prim2 ~loc:(symbol_rloc dyp) Mod $1 $5 } pb
-  | binop_expr(<=pc) EOL? eqeq_op EOL?      binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
-  | binop_expr(<=pc) EOL? lcaret_op EOL?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
-  | binop_expr(<=pc) EOL? rcaret_op EOL?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
-  | binop_expr(<=pc) EOL? lesseq_op EOL?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
-  | binop_expr(<=pc) EOL? greatereq_op EOL? binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
-  | binop_expr(<=pb) EOL? ampamp_op EOL?    binop_expr(<pb) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pb
-  | binop_expr(<=pb) EOL? pipepipe_op EOL?  binop_expr(<pb) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pb
+  | binop_expr(<=pp) eols? plus_op eols?      binop_expr(<pp) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pp
+  | binop_expr(<=pp) eols? dash_op eols?      binop_expr(<pp) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pp
+  | binop_expr(<=pt) eols? star_op eols?      binop_expr(<pt) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pt
+  | binop_expr(<=pt) eols? slash_op eols?     binop_expr(<pt) { Exp.prim2 ~loc:(symbol_rloc dyp) Divide $1 $5 } pt
+  | binop_expr(<=pb) eols? percent_op eols?   binop_expr(<pb) { Exp.prim2 ~loc:(symbol_rloc dyp) Mod $1 $5 } pb
+  | binop_expr(<=pc) eols? is_op eols?        binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? eqeq_op eols?      binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? noteq_op eols?     binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? lcaret_op eols?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? rcaret_op eols?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? lesseq_op eols?    binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pc) eols? greatereq_op eols? binop_expr(<pc) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pc
+  | binop_expr(<=pb) eols? ampamp_op eols?    binop_expr(<pb) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pb
+  | binop_expr(<=pb) eols? pipepipe_op eols?  binop_expr(<pb) { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5] } pb
   | binop_expr colon typ { Exp.constraint_ ~loc:(symbol_rloc dyp) $1 $3 } pe
   | lam_expr { $1 } pl
-  | non_assign_expr { $1 } pe
-  | assign_expr { $1 } pa
-
-non_binop_expr :
   | non_assign_expr { $1 } pe
   | assign_expr { $1 } pa
 
@@ -308,7 +314,7 @@ typ :
   | data_typ
 
 typs :
-  | [typ [comma typ {$2}]* {$1::$2}]? { Option.default [] $1 }
+  | [typ [comma typ {$2}]* {$1::$2}]? { Option.value ~default:[] $1 }
 
 tuple_typs :
   | typ comma { [$1] }
@@ -322,20 +328,22 @@ value_binds :
 
 import_shape :
   | id { PImportModule, Some $1 }
-  | STAR [EXCEPT lbrace id [comma id {$2}]* rbrace {$3::$4}]? [AS id {$2}]? { PImportAllExcept (Option.default [] $2), $3 }
-  | lbrace [id [AS id {$2}]? [comma id [AS id {$2}]? {($2, $3)}]* {($1, $2)::$3}]? rbrace [AS id {$2}]? { PImportValues (Option.default [] $2), $4 }
+  | STAR [EXCEPT lbrace id [comma id {$2}]* rbrace {$3::$4}]? [AS id {$2}]? { PImportAllExcept (Option.value ~default:[] $2), $3 }
+  | lbrace [id [AS id {$2}]? [comma id [AS id {$2}]? {($2, $3)}]* {($1, $2)::$3}]? rbrace [AS id {$2}]? { PImportValues (Option.value ~default:[] $2), $4 }
 
 import_stmt :
   | IMPORT import_shape [comma import_shape {$2}]* FROM file_path { Imp.mk ($2::$3) $5 }
 
 export_stmt :
-  | EXPORT LET REC value_binds { Top.let_ Exported Recursive $4 }
-  | EXPORT LET value_binds { Top.let_ Exported Nonrecursive $3 }
+  | EXPORT LET REC value_binds { Top.let_ Exported Recursive Immutable $4 }
+  | EXPORT LET value_binds { Top.let_ Exported Nonrecursive Immutable $3 }
+  | EXPORT LET REC MUT value_binds { Top.let_ Exported Recursive Mutable $5 }
+  | EXPORT LET MUT value_binds { Top.let_ Exported Nonrecursive Mutable $4 }
   | EXPORT foreign_stmt { Top.foreign ~loc:(symbol_rloc dyp) Exported $2 }
   | EXPORT primitive_stmt { Top.primitive ~loc:(symbol_rloc dyp) Exported $2 }
   | EXPORT data_declaration { Top.data Exported $2 }
   | EXPORT any_id_str [AS any_id_str {$2}]? [comma any_id_str [AS any_id_str {$2}]? {$2, $3}]* { Top.export ~loc:(symbol_rloc dyp) (Ex.mk ~loc:(symbol_rloc dyp) (($2, $3)::$4)) }
-  | EXPORT STAR [EXCEPT export_id_str [comma export_id_str {$2}]* {$2::$3}]? { Top.export_all ~loc:(symbol_rloc dyp) (Option.default [] $3) }
+  | EXPORT STAR [EXCEPT export_id_str [comma export_id_str {$2}]* {$2::$3}]? { Top.export_all ~loc:(symbol_rloc dyp) (Option.value ~default:[] $3) }
 
 data_constructor :
   | TYPEID { CDecl.singleton ~loc:(symbol_rloc dyp) (mkstr dyp $1) }
@@ -345,17 +353,18 @@ data_constructor :
   | lbrack ELLIPSIS rbrack lparen typs rparen { CDecl.tuple ~loc:(symbol_rloc dyp) (mkstr dyp "[...]") $5 }
 
 data_constructors :
-  | pipe? data_constructor [EOL? pipe data_constructor {$3}]* { $2::$3 }
+  | pipe? data_constructor [eols? pipe data_constructor {$3}]* { $2::$3 }
 
 data_label :
-  | simple_id colon typ { LDecl.mk ~loc:(symbol_rloc dyp) $1 $3 }
+  | simple_id colon typ { LDecl.mk ~loc:(symbol_rloc dyp) $1 $3 Immutable }
+  | MUT simple_id colon typ { LDecl.mk ~loc:(symbol_rloc dyp) $2 $4 Mutable }
 
 data_labels :
-  | lbrace data_label [comma data_label {$2}]* rbrace { $2::$3 }
+  | lbrace data_label [comma data_label {$2}]* comma? rbrace { $2::$3 }
 
 data_declaration :
-  | DATA TYPEID [lcaret ID [comma ID {$2}]* rcaret {$2::$3}]? equal data_constructors { Dat.variant ~loc:(symbol_rloc dyp) (mkstr dyp $2) (List.map Typ.var (Option.default [] $3)) $5 }
-  | DATA TYPEID [lcaret ID [comma ID {$2}]* rcaret {$2::$3}]? equal data_labels { Dat.record ~loc:(symbol_rloc dyp) (mkstr dyp $2) (List.map Typ.var (Option.default [] $3)) $5 }
+  | DATA TYPEID [lcaret ID [comma ID {$2}]* rcaret {$2::$3}]? equal data_constructors { Dat.variant ~loc:(symbol_rloc dyp) (mkstr dyp $2) (List.map Typ.var (Option.value ~default:[] $3)) $5 }
+  | DATA TYPEID [lcaret ID [comma ID {$2}]* rcaret {$2::$3}]? equal data_labels { Dat.record ~loc:(symbol_rloc dyp) (mkstr dyp $2) (List.map Typ.var (Option.value ~default:[] $3)) $5 }
 
 prim1_expr :
   | NOT non_assign_expr { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp ["!"]) [$2] }
@@ -365,7 +374,7 @@ paren_expr :
   | lparen expr rparen { $2 }
 
 app_arg_exprs :
-  | [expr [comma expr {$2}]* { $1::$2 }]? { Option.default [] $1 }
+  | [expr [comma expr {$2}]* { $1::$2 }]? { Option.value ~default:[] $1 }
 
 app_expr :
   | id_expr lparen app_arg_exprs rparen { prerr_string "\napp_expr\n"; when_debug ~n:1 (fun () -> dyp.print_state stderr); Exp.apply ~loc:(symbol_rloc dyp) $1 $3 }
@@ -377,36 +386,42 @@ ext_constructor :
 
 plus_op :
   | PLUS { "+" }
-dash_op :  
+dash_op :
   | DASH { "-" }
-star_op :  
+star_op :
   | STAR { "*" }
-slash_op :  
+slash_op :
   | SLASH { "/" }
-percent_op :  
+percent_op :
   | PERCENT { "%" }
-eqeq_op :  
+is_op :
+  | IS { "is" }
+eqeq_op :
   | EQEQ { "==" }
-lcaret_op :  
+noteq_op :
+  | NOT EQUAL { "!=" }
+lcaret_op :
   | LCARET { "<" }
-rcaret_op :  
+rcaret_op :
   | RCARET { ">" }
-lesseq_op :  
+lesseq_op :
   | LESSEQ { "<=" }
-greatereq_op :  
+greatereq_op :
   | GREATEREQ { ">=" }
-ampamp_op :  
+ampamp_op :
   | AMPAMP { "&&" }
-pipepipe_op :  
+pipepipe_op :
   | PIPEPIPE { "||" }
-pluseq_op :  
-  | PLUS EQUAL { "+=" }
-dasheq_op :  
-  | DASH EQUAL { "-=" }
-stareq_op :  
-  | STAR EQUAL { "*=" }
-slasheq_op :  
-  | SLASH EQUAL { "/=" }
+pluseq_op :
+  | PLUS EQUAL { "+" }
+dasheq_op :
+  | DASH EQUAL { "-" }
+stareq_op :
+  | STAR EQUAL { "*" }
+slasheq_op :
+  | SLASH EQUAL { "/" }
+percenteq_op :
+  | PERCENT EQUAL { "%" }
 
 infix_op :
   | plus_op
@@ -414,7 +429,9 @@ infix_op :
   | star_op
   | slash_op
   | percent_op
+  | is_op
   | eqeq_op
+  | noteq_op
   | lcaret_op
   | rcaret_op
   | lesseq_op
@@ -462,19 +479,21 @@ block_or_expr :
   | expr { no_brace_expr $1; $1 }
 
 lam_args :
-  | patterns? { Option.default [] $1 }
+  | patterns? { Option.value ~default:[] $1 }
 
 lam_expr :
   | lparen lam_args rparen thickarrow block_or_expr { Exp.lambda ~loc:(symbol_rloc dyp) $2 $5 }
   | ID thickarrow block_or_expr { Exp.lambda ~loc:(symbol_rloc dyp) [Pat.var ~loc:(rhs_loc dyp 1) (mkstr dyp $1)] $3 }
 
 let_expr :
-  | LET REC value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Recursive $3 (Exp.block []) }
-  | LET value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Nonrecursive $2 (Exp.block []) }
+  | LET REC value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Recursive Immutable $3 (Exp.block []) }
+  | LET value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Nonrecursive Immutable $2 (Exp.block []) }
+  | LET REC MUT value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Recursive Mutable $4 (Exp.block []) }
+  | LET MUT value_binds { Exp.let_ ~loc:(symbol_rloc dyp) Nonrecursive Mutable $3 (Exp.block []) }
 
 if_expr :
-  | IF lparen expr rparen EOL? block_or_expr { Exp.if_ ~loc:(symbol_rloc dyp) $3 $6 (Exp.block []) }
-  | IF lparen expr rparen EOL? block_or_expr ELSE EOL? block_or_expr { Exp.if_ ~loc:(symbol_rloc dyp) $3 $6 $9 }
+  | IF lparen expr rparen eols? block_or_expr { Exp.if_ ~loc:(symbol_rloc dyp) $3 $6 (Exp.block []) }
+  | IF lparen expr rparen eols? block_or_expr ELSE eols? block_or_expr { Exp.if_ ~loc:(symbol_rloc dyp) $3 $6 $9 }
 
 while_expr :
   | WHILE lparen expr rparen block { Exp.while_ ~loc:(symbol_rloc dyp) $3 $5 }
@@ -483,14 +502,18 @@ match_branch :
   | pattern thickarrow expr { Mb.mk ~loc:(symbol_rloc dyp) $1 $3 }
 
 match_branches :
-  | pipe? match_branch [EOL? pipe match_branch {$3}]* { $2::$3 }
+  | pipe? match_branch [eols? pipe match_branch {$3}]* { $2::$3 }
 
 match_expr :
   | MATCH lparen expr rparen lbrace match_branches rbrace { Exp.match_ ~loc:(symbol_rloc dyp) $3 $6 }
 
+list_expr_ending :
+  | comma? { None }
+  | comma ELLIPSIS expr { Some $3 }
+
 list_expr :
   | lbrack rbrack { Exp.list ~loc:(symbol_rloc dyp) [] None }
-  | lbrack expr [comma expr {$2}]* [comma ELLIPSIS expr {$3}]? rbrack { Exp.list ~loc:(symbol_rloc dyp) ($2::$3) $4 }
+  | lbrack expr [comma expr {$2}]* list_expr_ending rbrack { Exp.list ~loc:(symbol_rloc dyp) ($2::$3) $4 }
 
 array_expr :
   | lbrack rcaret rbrack { Exp.array ~loc:(symbol_rloc dyp) [] }
@@ -500,8 +523,18 @@ stmt_expr :
   | ASSERT expr { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp ["assert"]) [$2] }
   | FAIL expr { Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp ["fail"]) [$2] }
 
+assign_binop_op :
+  | pluseq_op
+  | dasheq_op
+  | stareq_op
+  | slasheq_op
+  | percenteq_op
+
 assign_expr :
-  | binop_expr(<pl) EOL? GETS EOL? expr { no_array_access $1; Exp.assign ~loc:(symbol_rloc dyp) $1 $5 }
+  | binop_expr(<pl) eols? GETS eols? expr { no_array_access $1; Exp.box_assign ~loc:(symbol_rloc dyp) $1 $5 }
+  | id_expr equal expr { Exp.assign ~loc:(symbol_rloc dyp) $1 $3 }
+  | id_expr eols? assign_binop_op eols? expr { Exp.assign ~loc:(symbol_rloc dyp) $1 (Exp.apply ~loc:(symbol_rloc dyp) (mkid_expr dyp [$3]) [$1; $5]) }
+  | record_set { $1 }
   | array_set { $1 }
 
 non_assign_expr :
@@ -523,21 +556,24 @@ block_body_expr :
   | expr  { $1 }
 
 block_body_stmt :
-  | block_body_expr SEMI EOL? { Exp.ignore $1 }
-  | block_body_expr EOL { $1 }
+  | block_body_expr SEMI eols? { Exp.ignore $1 }
+  | block_body_expr eols { $1 }
 
 tuple_exprs :
   | expr comma { [$1] }
   | expr [comma expr {$2}]+ { $1::$2 }
 
 array_get :
-  | non_binop_expr lbrack expr rbrack { Exp.array_get ~loc:(symbol_rloc dyp) $1 $3 }
+  | non_assign_expr lbrack expr rbrack { Exp.array_get ~loc:(symbol_rloc dyp) $1 $3 }
 
 array_set :
-  | expr lbrack expr rbrack GETS EOL? expr { Exp.array_set ~loc:(symbol_rloc dyp) $1 $3 $7 }
+  | expr lbrack expr rbrack GETS eols? expr { Exp.array_set ~loc:(symbol_rloc dyp) $1 $3 $7 }
 
 record_get :
-  | non_binop_expr dot simple_id { no_uppercase_ident $1; Exp.record_get $1 $3 }
+  | non_assign_expr dot simple_id { no_uppercase_ident $1; Exp.record_get $1 $3 }
+
+record_set :
+  | non_assign_expr dot simple_id equal expr { no_uppercase_ident $1; Exp.record_set ~loc:(symbol_rloc dyp) $1 $3 $5 }
 
 record_field :
   | id colon expr { $1, $3 }
@@ -546,7 +582,7 @@ record_pun :
   | ID { mkid [$1] (symbol_rloc dyp), Exp.ident ~loc:(symbol_rloc dyp) (mkid [$1] (symbol_rloc dyp)) }
 
 record_exprs :
-  | [record_field | record_pun] [comma [record_field | record_pun] {$2}]* {$1::$2}
+  | [record_field | record_pun] [comma [record_field | record_pun] {$2}]* comma? {$1::$2}
 
 block_body :
   | block_body_stmt* block_body_expr SEMI { $1 @ [Exp.ignore $2] }
@@ -572,19 +608,21 @@ export_id_str :
   | type_id_str { ExportExceptData $1 }
 
 foreign_stmt :
-  | FOREIGN WASM id_str colon typ FROM file_path { Val.mk ~loc:(symbol_rloc dyp) ~mod_:$7 ~name:$3 ~typ:$5 ~prim:[] }
+  | FOREIGN WASM id_str colon typ [AS id_str {$2}]? FROM file_path { Val.mk ~loc:(symbol_rloc dyp) ~mod_:$8 ~name:$3 ~alias:$6 ~typ:$5 ~prim:[] }
 
 primitive :
   | ASSERT { Location.mkloc "assert" (symbol_rloc dyp) }
   | FAIL { Location.mkloc "fail" (symbol_rloc dyp) }
 
 primitive_stmt :
-  | PRIMITIVE id_str colon typ equal STRING { Val.mk ~loc:(symbol_rloc dyp) ~mod_:{$2 with txt="primitive"} ~name:$2 ~typ:$4 ~prim:[$6] }
-  | PRIMITIVE primitive colon typ equal STRING { Val.mk ~loc:(symbol_rloc dyp) ~mod_:{$2 with txt="primitive"} ~name:$2 ~typ:$4 ~prim:[$6] }
+  | PRIMITIVE id_str colon typ equal STRING { Val.mk ~loc:(symbol_rloc dyp) ~mod_:{$2 with txt="primitive"} ~name:$2 ~alias:None ~typ:$4 ~prim:[$6] }
+  | PRIMITIVE primitive colon typ equal STRING { Val.mk ~loc:(symbol_rloc dyp) ~mod_:{$2 with txt="primitive"} ~name:$2 ~alias:None ~typ:$4 ~prim:[$6] }
 
 toplevel_stmt :
-  | LET REC value_binds { Top.let_ Nonexported Recursive $3 }
-  | LET value_binds { Top.let_ Nonexported Nonrecursive $2 }
+  | LET REC value_binds { Top.let_ Nonexported Recursive Immutable $3 }
+  | LET value_binds { Top.let_ Nonexported Nonrecursive Immutable $2 }
+  | LET REC MUT value_binds { Top.let_ Nonexported Recursive Mutable $4 }
+  | LET MUT value_binds { Top.let_ Nonexported Nonrecursive Mutable $3 }
   | expr { Top.expr $1 }
   | import_stmt { Top.import $1 }
   | IMPORT foreign_stmt { Top.foreign ~loc:(symbol_rloc dyp) Nonexported $2 }
@@ -596,7 +634,7 @@ toplevel_stmts :
   | toplevel_stmt [eos toplevel_stmt {$2}]* { $1::$2 }
 
 program :
-  | EOL? toplevel_stmts eos? EOF { make_program $2 }
+  | eols? toplevel_stmts eos? EOF { make_program $2 }
 
 %%
 

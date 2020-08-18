@@ -1,0 +1,138 @@
+export primitive length : Array<a> -> Number = "@array.length"
+export primitive make : (Number, a) -> Array<a> = "@array.make"
+export primitive init : (Number, Number -> a) -> Array<a> = "@array.init"
+
+export let get = (index, array) => {
+  array[index]
+}
+
+export let set = (index, value, array) => {
+  array[index] := value
+}
+
+export let append = (array1, array2) => {
+  let len1 = length(array1)
+  let len2 = length(array2)
+
+  init(len1 + len2, n => {
+    if (n < len1) {
+      array1[n]
+    } else {
+      array2[n - len1]
+    }
+  })
+}
+
+export let concat = (arrays) => {
+  # This function is slightly verbose to avoid depending on the List stdlib.
+
+  let rec findLength = (arrays, acc) => {
+    match (arrays) {
+      | [fst, ...rest] => findLength(rest, acc + length(fst))
+      | [] => acc
+    }
+  }
+
+  let mut offset = 0
+  let mut arrs = arrays
+
+  let rec next = (index) => {
+    let array = match (arrs) {
+      | [fst, ..._] => fst
+      | [] => fail "end of arrays list"
+    }
+    if (index - offset == length(array)) {
+      offset += length(array)
+      arrs = match (arrs) {
+        | [_, ...rest] => rest
+        | [] => fail "end of arrays list"
+      }
+      next(index)
+    } else {
+      array[index - offset]
+    }
+  }
+
+  init(findLength(arrays, 0), next)
+}
+
+export let copy = (array) => {
+  init(length(array), n => array[n])
+}
+
+export let forEach = (fn, array) => {
+  let length = length(array)
+  let mut count = 0
+  while (count < length) {
+    fn(array[count])
+    count = incr(count)
+  }
+}
+
+export let forEachi = (fn, array) => {
+  let length = length(array)
+  let mut count = 0
+  while (count < length) {
+    fn(array[count], count)
+    count = incr(count)
+  }
+}
+
+export let map = (fn, array) => {
+  let length = length(array)
+  init(length, (i) => {
+    fn(array[i])
+  })
+}
+
+export let mapi = (fn, array) => {
+  let length = length(array)
+  init(length, (index) => {
+    fn(array[index], index)
+  })
+}
+
+export let toList = (array) => {
+  let rec buildList = (acc, index) => {
+    let index = index - 1
+    if (index < 0) {
+      acc
+    } else {
+      buildList([array[index], ...acc], index)
+    }
+  }
+  buildList([], length(array))
+}
+
+export let fromList = (list) => {
+  let rec listLength = (list, acc) => {
+    match (list) {
+      | [_, ...rest] => listLength(rest, acc + 1)
+      | [] => acc
+    }
+  }
+
+  let mut lst = list
+  let rec next = (index) => {
+    match (lst) {
+      | [fst, ...rest] => {
+        lst = rest
+        fst
+      }
+      | [] => next(index)
+    }
+  }
+  init(listLength(list, 0), next)
+}
+
+# TODO: This should use recursion when we can pattern match arrays
+export let contains = (search, array) => {
+  let len = length(array);
+  let mut index = 0;
+  let mut found = false;
+  while ((!found) && (index < len)) {
+    found = (array[index] == search);
+    index += 1;
+  }
+  found
+}

@@ -2,33 +2,51 @@
   "name": "compiler",
   "version": "0.0.0",
   "esy": {
-    "build": "dune build @install",
     "buildEnv": {
       "DUNE_BUILD_DIR": "#{self.target_dir}",
-      "GRAIN_STDLIB": "#{self.root}/../stdlib"
+      "GRAIN_STDLIB": "#{self.root / '..' / 'stdlib'}",
+      "GRAINC_BIN_PATH": "#{self.target_dir / 'default' / 'grainc' / 'grainc.exe'}",
+      "CLI_BIN_DIR": "#{self.root / '..' / 'cli' / 'bin'}"
     }
   },
   "scripts": {
+    "compile": "dune build",
+    "copy-compiler": "cp #{$GRAINC_BIN_PATH} #{$CLI_BIN_DIR}",
     "clean": "rm -rf #{self.root}/_esy",
-    "no-pnp": "rm -rf #{self.root}/_esy/default/bin",
-    "install-compiler": "dune install",
-    "test": "dune runtest --force"
+    "test": "dune runtest --force",
+    "format": "dune build @fmt --auto-promote",
+    "check-format": "dune build @fmt"
   },
   "dependencies": {
     "@opam/grain": "*",
+    "@opam/grainc": "*",
     "@opam/grain_utils": "*",
     "@opam/grain_parsing": "*",
     "@opam/grain_typed": "*",
     "@opam/grain_middle_end": "*",
     "@opam/grain_codegen": "*",
-    "ocaml": "~4.8.1000"
+    "@opam/fp": "*",
+    "@opam/fs": "*",
+    "@opam/utf8": "*",
+    "ocaml": "~4.10.0"
+  },
+  "devDependencies": {
+    "@opam/reason": "*",
+    "@opam/ocaml-lsp-server": "ocaml/ocaml-lsp:ocaml-lsp-server.opam#ce1840355541ff60b999e39388835027f89d8798"
   },
   "resolutions": {
-    "@opam/grain": "path:./grain.opam",
-    "@opam/grain_utils": "path:./grain_utils.opam",
-    "@opam/grain_parsing": "path:./grain_parsing.opam",
-    "@opam/grain_typed": "path:./grain_typed.opam",
-    "@opam/grain_middle_end": "path:./grain_middle_end.opam",
-    "@opam/grain_codegen": "path:./grain_codegen.opam"
+    "@opam/grain": "link:./grain.opam",
+    "@opam/grainc": "link:./grainc.opam",
+    "@opam/grain_utils": "link:./grain_utils.opam",
+    "@opam/grain_parsing": "link:./grain_parsing.opam",
+    "@opam/grain_typed": "link:./grain_typed.opam",
+    "@opam/grain_middle_end": "link:./grain_middle_end.opam",
+    "@opam/grain_codegen": "link:./grain_codegen.opam",
+    "@opam/fp": "facebookexperimental/reason-native:fp.opam#445493fca8d56ce58ee7c84a9e878a4303c9d296",
+    "@opam/fs": "facebookexperimental/reason-native:fs.opam#445493fca8d56ce58ee7c84a9e878a4303c9d296",
+    "@opam/utf8": "facebookexperimental/reason-native:utf8.opam#445493fca8d56ce58ee7c84a9e878a4303c9d296"
+  },
+  "installConfig": {
+    "pnp": false
   }
 }
